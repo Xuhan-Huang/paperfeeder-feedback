@@ -1,0 +1,16 @@
+{
+	"compatibility_date": "2025-10-08",
+	"main": "src/index.ts",
+	"name": "paperfeeder-feedback",
+	"upload_source_maps": true,
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_id": "22ea688d-f4af-4c9a-84b0-78ebfcaf5118",
+			"database_name": "paperfeeder-feedback-db"
+		}
+	],
+	"observability": {
+		"enabled": true
+	}
+}
