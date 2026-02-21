@@ -39,6 +39,9 @@ async function verifyToken(token, secret) {
   if (!["positive", "negative", "undecided"].includes(String(claims.label || "").toLowerCase())) {
     throw new Error("invalid label");
   }
+  if (!String(claims.run_id || "").trim() || !String(claims.item_id || "").trim()) {
+    throw new Error("missing run_id/item_id");
+  }
   return claims;
 }
 
@@ -55,7 +58,7 @@ export default {
         .prepare(
           `INSERT INTO feedback_events
            (event_id, run_id, item_id, label, reviewer, created_at, source, status, resolved_semantic_paper_id, applied_at, error)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL)`
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL)`
         )
         .bind(
           eventId,
@@ -64,7 +67,8 @@ export default {
           String(claims.label || "").toLowerCase(),
           String(claims.reviewer || ""),
           createdAt,
-          "email_link"
+          "email_link",
+          String(claims.semantic_paper_id || "") || null
         )
         .run();
       return new Response(
