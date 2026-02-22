@@ -1,5 +1,7 @@
-// Minimal Cloudflare Worker endpoint for one-click feedback capture.
-// Route: GET /feedback?t=<signed_token>
+// Cloudflare Worker for web feedback viewer and feedback capture.
+// Routes:
+// - GET /run?run_id=<run_id>
+// - GET /feedback?t=<signed_token>
 // Env bindings:
 // - DB (D1 database)
 // - FEEDBACK_LINK_SIGNING_SECRET (secret text)
@@ -36,7 +38,7 @@ async function verifyToken(token, secret) {
   const claims = JSON.parse(payloadJson);
   if (!claims || !claims.exp) throw new Error("invalid claims");
   if (new Date(claims.exp).getTime() < Date.now()) throw new Error("token expired");
-  if (!["positive", "negative", "undecided"].includes(String(claims.label || "").toLowerCase())) {
+  if (!["positive", "negative"].includes(String(claims.label || "").toLowerCase())) {
     throw new Error("invalid label");
   }
   if (!String(claims.run_id || "").trim() || !String(claims.item_id || "").trim()) {
@@ -48,35 +50,65 @@ async function verifyToken(token, secret) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname !== "/feedback") return new Response("Not Found", { status: 404 });
-    const token = url.searchParams.get("t") || "";
-    try {
-      const claims = await verifyToken(token, env.FEEDBACK_LINK_SIGNING_SECRET);
-      const eventId = `evt_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-      const createdAt = new Date().toISOString();
-      await env.DB
-        .prepare(
-          `INSERT INTO feedback_events
-           (event_id, run_id, item_id, label, reviewer, created_at, source, status, resolved_semantic_paper_id, applied_at, error)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL)`
-        )
-        .bind(
-          eventId,
-          String(claims.run_id || ""),
-          String(claims.item_id || ""),
-          String(claims.label || "").toLowerCase(),
-          String(claims.reviewer || ""),
-          createdAt,
-          "email_link",
-          String(claims.semantic_paper_id || "") || null
-        )
-        .run();
-      return new Response(
-        `Feedback recorded: run=${claims.run_id}, item=${claims.item_id}, label=${claims.label}`,
-        { status: 200 }
-      );
-    } catch (err) {
-      return new Response(`Feedback rejected: ${err.message}`, { status: 400 });
+    if (url.pathname === "/run") {
+      const runId = String(url.searchParams.get("run_id") || "").trim();
+      if (!runId) {
+        return new Response("Missing run_id", { status: 400 });
+      }
+      const row = await env.DB
+        .prepare(`SELECT report_html, created_at FROM feedback_runs WHERE run_id = ? LIMIT 1`)
+        .bind(runId)
+        .first();
+      if (!row || !row.report_html) {
+        return new Response("Run not found", { status: 404 });
+      }
+      const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Paper Digest Feedback</title></head>
+<body>
+  <div style="margin:12px 0;padding:10px;border:1px solid #d0dae6;border-radius:10px;background:#f8fbff;">
+    <strong>Paper Digest Feedback Viewer</strong><br/>
+    run_id: <code>${runId}</code>
+  </div>
+  ${row.report_html}
+</body></html>`;
+      return new Response(html, {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
     }
+
+    if (url.pathname === "/feedback") {
+      const token = url.searchParams.get("t") || "";
+      try {
+        const claims = await verifyToken(token, env.FEEDBACK_LINK_SIGNING_SECRET);
+        const eventId = `evt_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+        const createdAt = new Date().toISOString();
+        await env.DB
+          .prepare(
+            `INSERT INTO feedback_events
+             (event_id, run_id, item_id, label, reviewer, created_at, source, status, resolved_semantic_paper_id, applied_at, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL)`
+          )
+          .bind(
+            eventId,
+            String(claims.run_id || ""),
+            String(claims.item_id || ""),
+            String(claims.label || "").toLowerCase(),
+            String(claims.reviewer || ""),
+            createdAt,
+            "web_viewer",
+            String(claims.semantic_paper_id || "") || null
+          )
+          .run();
+        const backUrl = `/run?run_id=${encodeURIComponent(String(claims.run_id || ""))}`;
+        return new Response(
+          `<!doctype html><html><body><p>Feedback recorded: ${claims.label} (${claims.item_id})</p><p><a href="${backUrl}">Back to report viewer</a></p></body></html>`,
+          { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }
+        );
+      } catch (err) {
+        return new Response(`Feedback rejected: ${err.message}`, { status: 400 });
+      }
+    }
+    return new Response("Not Found", { status: 404 });
   },
 };
