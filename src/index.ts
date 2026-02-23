@@ -38,7 +38,7 @@ async function verifyToken(token, secret) {
   const claims = JSON.parse(payloadJson);
   if (!claims || !claims.exp) throw new Error("invalid claims");
   if (new Date(claims.exp).getTime() < Date.now()) throw new Error("token expired");
-  if (!["positive", "negative"].includes(String(claims.label || "").toLowerCase())) {
+  if (!["positive", "negative", "undecided"].includes(String(claims.label || "").toLowerCase())) {
     throw new Error("invalid label");
   }
   if (!String(claims.run_id || "").trim() || !String(claims.item_id || "").trim()) {
